@@ -1,0 +1,277 @@
+---
+title: "Assignment2_HLM"
+author: "Jasleen Madan"
+date: "2025-02-24"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+```{r 1}
+library(foreign) 
+library(tidyverse)
+library(psych) 
+library(lmerTest) 
+library(lme4)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(gridExtra)
+```
+
+```{r 2}
+setwd("/Users/jasleenmadan/Downloads/")
+HSB <- as.data.frame(read.spss("HSB.sav")) #reading data
+dim(HSB)
+head(HSB)
+```
+
+```{r 3}
+str(HSB)
+HSB$schoolid <- as.factor(HSB$schoolid) #changing from chr t factor
+```
+```{r 4}
+level2vars <-HSB[,c("size", "sector", "pracad", "disclim", "himinty", "meanses")] #only taking level 2 variables
+level2 <- aggregate(level2vars, by=list(HSB$schoolid), FUN = unique) #aggregating by schoolid 
+dim(level2) #160 schools 
+```
+```{r 5}
+str(level2)
+level2$himinty <- as.factor(level2$himinty)
+level2$sector<-as.factor(level2$sector)
+
+head(level2,3)
+```
+
+```{r 5.1}
+names(level2)[1] <- 'schoolid'
+level1vars <- HSB[,c("minority", "female", "ses", "mathach")]
+```
+
+```{r 6}
+level1means <- aggregate(level1vars, list(HSB$schoolid), mean, rm.na=TRUE)
+head(level1means) #aggregate values by schools by taking mean values 
+```
+```{r 7}
+names(level1means) <- c("schoolid", "p.minority", "p.female", "mean.ses", "mean.math")
+
+level2data <- merge(level2, level1means, by="schoolid")
+head(level2data)
+```
+#Q1. summary tables of descriptive statistics for the Level-1 (student) and Level-2 (school) variables
+```{r 8}
+# Level 1
+HSB %>%
+  select("minority", "female", "ses", "mathach") %>%
+  describe() %>%
+  select(n,mean, sd, median, min, max)
+```
+```{r 9}
+# Level 2
+level2data <- HSB %>%
+group_by(schoolid) %>%
+summarise(Nstudents = n(), size = unique(size), sector=unique(sector),
+disclim = unique(disclim), himinty=unique(himinty), meanses = unique(meanses),
+p.minority = mean(minority), p.female = mean(female), mean.ses = mean(ses),
+mean.math = mean(mathach))
+level2data %>%
+group_by(schoolid) %>%
+summarize_all(unique) %>%
+describe() %>%
+select(n,mean, sd, median, min, max)
+```
+
+# Q2.
+Create figures that depict the relationships between mathach and the Level-1 predictors minority, female, and ses, both within and across schools.
+
+```{r 10}
+#within school - plot  
+######################################################################
+
+# Compute school-level mean math scores by gender
+level2mean.gender <- HSB %>%
+  group_by(schoolid, female) %>%
+  summarise(mean_mathach = mean(mathach, na.rm = TRUE), .groups = "drop") %>%
+  mutate(variable = "Gender", category = factor(female, levels = c(0, 1), labels = c("Male", "Female")))
+
+#Compute school-level mean math scores by minority status
+level2mean.minority <- HSB %>%
+  group_by(schoolid, minority) %>%
+  summarise(mean_mathach = mean(mathach, na.rm = TRUE), .groups = "drop") %>%
+  mutate(variable = "Minority", category = factor(minority, levels = c(0, 1), labels = c("Non-Minority", "Minority")))
+
+#Compute school-level mean math scores by SES quartiles
+HSB$ses.qt <- cut(HSB$ses, quantile(HSB$ses, probs = seq(0, 1, 0.25), na.rm = TRUE), include.lowest = TRUE)
+level2mean.ses <- HSB %>%
+  group_by(schoolid, ses.qt) %>%
+  summarise(mean_mathach = mean(mathach, na.rm = TRUE), .groups = "drop") %>%
+  mutate(variable = "SES", category = as.character(ses.qt))
+
+# Combine all datasets
+combined_data <- bind_rows(level2mean.gender, level2mean.minority, level2mean.ses)
+
+# Plot
+p <- ggplot(combined_data, aes(x = category, y = mean_mathach, group = schoolid)) +
+  geom_line(alpha = 0.5, color = "black") +  
+  facet_wrap(~ variable, scales = "free_x") +  
+  labs(
+       x = "Category", y = "School Mean Math Score") +
+  theme_minimal()
+print(p)
+```
+```{r 11}
+# across schools plot 
+######################################################################
+
+# Set up a 1x3 grid for the plots
+par(mfrow = c(1, 3))
+
+# Plot for marginal mean math score on sex
+Ymean.gender <- t(with(HSB, tapply(mathach, list(female), mean)))
+plot(c(0, 1), Ymean.gender, ylim = c(0, 20),
+     type = 'o', pch = 16, xlab = 'Gender', ylab = 'Mean math score', xaxt = 'n',
+     main = "Math Score by Gender")
+axis(1, at = c(0, 1), labels = c('Male', 'Female'))
+
+# Plot for marginal mean math score on minority
+Ymean.minority <- t(with(HSB, tapply(mathach, list(minority), mean)))
+plot(c(0, 1), Ymean.minority, ylim = c(0, 20),
+     type = 'o', pch = 16, xlab = 'Minority', ylab = 'Mean math score', xaxt = 'n',
+     main = "Math Score by Minority Status")
+axis(1, at = c(0, 1), labels = c('Non-minority', 'Minority'))
+
+# Plot for marginal mean math score on SES
+Ymean.ses.qt <- t(with(HSB, tapply(mathach, list(ses.qt), mean)))
+ses.qt.mean <- tapply(HSB$ses, HSB$ses.qt, mean)
+plot(ses.qt.mean, Ymean.ses.qt, ylim = c(0, 20), type = 'o', pch = 16,
+     xlab = 'SES', ylab = 'Mean math score', xaxt = 'n', 
+     main = "Math Score by SES")
+axis(1, at = ses.qt.mean, labels = c('<25%', '50%','75%','>75%'))
+
+```
+# interpretation
+In first figure we see individual trajectories of schools' mean math scores across categories. The variation between male and female students appears relatively small, with some fluctuation across schools. non-minority students tend to have higher mean math scores than minority students. However, some schools show different trends. There is a clear upward trend, where schools with higher SES have higher mean math scores.
+
+In mean plot figure 2, we see male students have slightly higher mean math scores than female students, but the difference is small.Non-minority students have notably higher mean scores compared to minority students. There is a strong positive correlation between SES and math scores. Schools with higher SES consistently show higher mean scores.
+
+Gender since its relatively stable can be included in fixed effects. The spaghetti plot shows that different schools have different trends, especially in Minority Status and SES. This suggests the need for a random intercept to account for variation between schools. Some schools might exhibit different SES effects depending on minority status, making it a candidate for a random slope.
+
+
+```{r 12}
+# Model 0: empty model, a.k.a. null model or unconditional model
+summary(model0 <- lmer(mathach ~ (1|schoolid), HSB), correlation = FALSE)
+```
+# Q3. Equations for random slope model -in both hierarchical linear form and linear mixed model form
+ Level 1: within school model 
+ Y(ij) = B0(j) + B1(j)*minority(ij) + R(ij), R(ij)~ N(0, sigma2)
+ Yij - mathachievement score for student i in school j 
+ B0(j) - average math achievement in school j 
+ B1(j) - Slope for the effect of minority status in school j 
+ minority ij = Minority status of student i in school j 
+ Rij - residuals normally distributed
+ 
+ Level 2 (Between-School Model):
+B0(j) = r00 +r01*sectorj +U0j
+r00 = Overall mean math achievement across all schools
+r01 = Effect of school sector on math achievement
+
+B1j = r10 +U1j
+r10 = Average effect of minority status on math achievement
+
+for cross interaction
+in Bij equation add the r11*sector(j) term
+
+###Linear mixed model form
+ Y(ij) = r00 + (r10 +U1j)*minority(ij)+ U0j + Rij
+ 
+```{r a13}
+level1vars_long <- pivot_longer(level1vars, cols = everything(), names_to = "variable", values_to = "value")
+
+# Create histograms
+ggplot(level1vars_long, aes(x = value)) +
+  geom_histogram(bins = 30, fill = "gray", color = "black", alpha = 0.7) +
+  facet_wrap(~variable, scales = "free") +
+  theme_minimal() +
+  labs( x = "Value", y = "Count")
+```
+# Q4. Compare the model fit of the random slope model to the random intercept model
+
+```{r 13}
+#Model2: RIM model with minority (level 1 predictor) and sector as level 2
+summary(model1.RIM <- lmer(mathach ~ minority + sector +  (1|schoolid), data = HSB, REML = FALSE),
+correlation = FALSE)
+```
+
+```{r 14}
+#Model3 : RSM with minority as level 1 predictor and sector as level 2
+summary(model2.RSM <- lmer(mathach ~ minority + sector+ (minority|schoolid), data = HSB, REML = FALSE),
+correlation = FALSE)
+```
+
+```{r 15}
+#model comparison -using a *mixture* chi-square test to assess whether adding a random slope significantly improves model fit
+anova(model1.RIM,model2.RSM)
+```
+## model2 rsm fits the data better. It has lower AIC and log likelihood. Also the LRT statistic has p<0.05, indicating model two is significantly better than RIM model. The significant improvement in Model 2 suggests that the impact of being a minority student on math achievement is not uniform across schools. Since Model 2 allows for a random slope, it suggests that factors at the school level  influence how minority status affects math performance.
+
+# Q5 Add a cross-level interaction between minority and sector to the random slope model
+```{r 16}
+summary(model3.cross <- lmer(mathach ~ minority + sector + minority*sector + (minority|schoolid), data = HSB, REML = FALSE),
+correlation = FALSE)
+```
+
+```{r 17}
+anova(model2.RSM, model3.cross)
+```
+The significant interaction (minority * sector) means that the effect of minority status on math achievement depends on school sector.In some school sectors, minority students may have a larger/smaller difference in achievement compared to non-minority students.Since p < 0.001 (*), Model 3 provides a significantly better fit than Model 2.
+
+#Q6. 
+Minority students score 5.18 points lower than non-minority students (12.714) in public schools. Minority students in catholic schools score 12.466, which is higher than minority students in public schools (7.533). Since the interaction term - r11 is positive, it mitigates the impact of lower scores achieved by minority in public school, though the minority students still have lower scores (compared to non minority catholic - 14.916), but gap is smaller.
+Also the interaction term is significant so the differential impact of catholic schools on minority students is significant. 
+
+#q7 . Create a table - 
+I was not able to create one single table but extracted all the required coefficients and displayed them seperately
+```{r 18}
+library(sjPlot)
+library(broom.mixed)
+library(knitr)
+
+
+rim<- model1.RIM
+rsm<- model2.RSM
+cross_interaction <- model3.cross
+
+fixed_effects <- bind_rows(
+  tidy(rim, effects = "fixed") %>% mutate(Model = "Random Intercept"),
+  tidy(rsm, effects = "fixed") %>% mutate(Model = "Random Slope"),
+  tidy(cross_interaction, effects = "fixed") %>% mutate(Model = "Slope-as-Outcomes")
+)
+
+random_effects <- bind_rows(
+  tidy(rim, effects = "ran_pars") %>% mutate(Model = "Random Intercept"),
+  tidy(rsm, effects = "ran_pars") %>% mutate(Model = "Random Slope"),
+  tidy(cross_interaction, effects = "ran_pars") %>% mutate(Model = "Slope-as-Outcomes")
+)
+
+model_fits <- data.frame(
+  Model = c("Random Intercept", "Random Slope", "Slope-as-Outcomes"),
+  AIC = c(AIC(rim), AIC(rsm), AIC(cross_interaction)),
+  BIC = c(BIC(rim), BIC(rsm), BIC(cross_interaction)),
+  Deviance = c(deviance(rim), deviance(rsm), deviance(cross_interaction)),
+  LogLikelihood = c(logLik(rim), logLik(rsm), logLik(cross_interaction))
+)
+
+print(model_fits)
+
+
+
+kable(fixed_effects, digits = 3, caption = "Fixed Effects: Coefficients")
+kable(random_effects, digits = 3, caption = "Random Effects: Variance Components")
+
+```
+
