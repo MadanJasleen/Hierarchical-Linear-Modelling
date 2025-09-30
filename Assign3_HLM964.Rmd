@@ -1,0 +1,195 @@
+---
+title: "Assign3_HLM964"
+author: "Jasleen Madan"
+date: "2025-04-09"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r 1}
+library(foreign) 
+library(tidyverse)
+library(psych) 
+library(lmerTest) 
+library(lme4)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(gridExtra)
+library(nlme)
+```
+
+```{r 2}
+
+setwd("/Users/jasleenmadan/Downloads/")
+NYS2 <- as.data.frame(read.spss("NYS2.sav")) #reading data
+dim(NYS2)
+head(NYS2)
+
+NYS1 <- as.data.frame(read.spss("NYS1.sav")) #reading data
+dim(NYS1)
+head(NYS1)
+```
+
+```{r 3}
+NYS <- merge(NYS1, NYS2, by ='id')
+dim(NYS)
+head(NYS)
+```
+#1. summary tables of descriptive statistics for the Level-1 and Level-2 
+```{r 4}
+# Level 1
+NYS1 %>%
+  describe() %>%
+  select(n,mean, sd, median, min, max)
+
+#Level2 
+NYS2 %>%
+  describe() %>%
+  select(n,mean, sd, median, min, max)
+
+#there are 239 units at level 2 and total 1079 observations
+
+table(NYS$age)
+```
+#2. Create one or more figures to illustrate the relationship between attitudes toward deviance and age (ages 11 to 15). Include individual trajectories and examine differences between males and females.
+```{r 5}
+(att_by_sex<- with(NYS, tapply(attit, list(female,age), mean)))
+xval <- 11:15 #taking for the range of ages in the data
+par(mfrow = c(1, 1))
+plot(xval, xval, type = 'n', xlab = '', ylab = '', xaxt = 'n', ylim = c(0, 1.25)) # y lim base don rang eof deviance
+axis(1, at = xval) #setting x values ticks 
+
+for (i in unique(NYS$id)) {
+  subset_data <- NYS[NYS$id == i, ]
+  line_color <- c('lightblue', 'limegreen')[subset_data$female + 1] # since indexing starts at 1
+  lines(subset_data$age, subset_data$attit, col = line_color)
+  
+  if (nrow(subset_data) == 1) {
+    points(subset_data$age, subset_data$attit, col = line_color, pch = 4)
+  } #if there is only one observation
+}
+
+lines(xval, att_by_sex[1, ], type = 'o', col = 'darkblue', lwd = 2, pch = 16)
+lines(xval, att_by_sex[2, ], type = 'o', col = 'darkred', lwd = 2, pch = 16)
+
+legend('topleft', c('male', 'female', 'male.mean', 'female.mean'), bty = 'n', 
+       col = c('lightblue', 'limegreen', 'darkblue', 'darkred'), pch = 16)
+title("Attitudes toward Deviance by Gender")
+```
+The average attitude for males and females seems to gradually increase across the ages, indicating that, on average, both groups show a rising attitude toward deviance as age increases. Overall trend is similar between both genders on avg. However there is more variation in individual attitudes for males compared to females, as evidenced by the more dispersed blue lines.
+
+#3. Fit a latent growth curve model using age11 (age centered at 11) and age11s (squared centered age) as predictors of attit. Include random effects for the intercept, linear, and quadratic terms. Begin with a simple Level-1 residual structure by assuming independent errors with a common variance. Note that, due to the inclusion of random effects at Level 2, the overall covariance structure is neither independent nor homoscedastic. Report and interpret all parameter estimates in context.
+
+```{r 6}
+NYS$time.ind <- NYS$age-10
+unique(NYS$time.ind)
+```
+```{r 7}
+#linear RSM model common variance 
+NYS <- NYS %>%
+  mutate(age11_centered = age11 - 11,
+         age11s_centered = age11_centered^2)
+(RSM <- lme(attit ~ age11_centered , random = ~ 1+ age11_centered | id, NYS, method = 'ML'))
+
+#decentered
+(RSM.1 <- lme(attit ~ age11 , random = ~ 1+ age11 | id, NYS, method = 'ML'))
+#equation - 
+#level1 
+#Attit(ti) = b0(i) + b1(i)T(ti) + e(ti) where T is indicator for time 0,1,2.. and b1 is age11
+
+#level2
+# b0(i) = B00  + u0i;
+# b1(i) = B10  + u1i
+
+#for an individual with age = 11, their average attitude towards deviance is 0.9098.Specifically, for each one-unit increase in age the attitude towards deviance increases by 0.0647 on average.
+#There is significant individual variability in both the baseline attitude std dev 0.61 and the effect of age on attit. Some individuals start with higher attitudes towards deviance and have stronger increases in attitude as they age.
+```
+#4. Write out the equations for the quadratic latent growth curve model. Define all subscripts, variables, and assumed distributions
+```{r 8}
+#equations
+#Attit(it) = b0(i) + b1(i).age11(it) + b2i.age11s(it) + e(it)
+# b0(i) = B00 + B01*Z(i) + u0i;
+# b1(i) = B10 + B11*Z(i) + u1i;
+# b2(i) = B20 + B11*Z(i) + u2i;
+#assumed distributions 
+#e~N(0,sigma) , error covairance structure
+#u~ bivariate normal 
+
+#(sq.RSM <- lme(attit ~ age11_centered + age11s_centered, random = ~ 1+ age11_centered + age11s_centered| id, NYS, method = 'ML')) # for some reason the centered model is not converging 
+
+#using decentered model
+(sq.RSM <- lme(attit ~ age11 + age11s, random = ~ 1+ age11+ age11s| id, NYS, method = 'ML'))
+
+# the linear effect of age is still positive but lesser than before, the quadratic effect is very small, accelaration is really slight. The strong negative correlation between the random slopes for age11 (linear) and I(age11^2) (quadratic) suggests that individuals with a stronger linear effect of age on attitude tend to experience a weaker quadratic effect (i.e., their attitude changes less as age increases).
+```
+
+#5. Assess whether including a quadratic term improves model fit and better captures changes in attitudes toward deviant behavior over time. Is a linear trajectory sufficient, or does the quadratic term provide a meaningful improvement? If the quadratic term is important, explain whether it should be included as a fixed effect only or as both a fixed and random effect. Justify your decision based on model fit and substantive interpretation.
+```{r 9}
+
+anova(RSM.1, sq.RSM) 
+## Model 2 has a slightly better AIC and BIC than Model 1, which suggests that the more complex model may offer a better fit when considering model selection criteria, also p<0.05 so we chose quadratic model 
+```
+```{r 10}
+#inclduing quadratic term only as fixed effect
+#(sq.RSM.fixedquad <- lme(attit ~ age11_centered + age11s_centered, random = ~ 1+ age11_centered | id, NYS, method = 'ML')) #again using decentered so can compare
+
+(sq.RSM.fixedquad <- lme(attit ~ age11 + age11s, random = ~ 1+ age11 | id, NYS, method = 'ML'))
+
+anova(RSM.1, sq.RSM,sq.RSM.fixedquad)
+
+# Model 3 (sq.RSM.fixedquad) provides a statistically significant improvement over Model 2, despite having slightly worse AIC and BIC values. If the additional complexity in Model 3 is justified, Model 3 would be the best choice. Quadratic term would be included in only fixed effects.
+
+```
+#6. Explore alternative Level-1 residual structures (e.g., autoregressive, heterogeneous variances, Toeplitz), and determine an appropriate specification based on model comparisons and fit. Report your reasoning and conclusions.
+```{r 100}
+
+RSM_with_hetero <- update(RSM.1, weights=varIdent(form = ~ 1|age11))
+#RSM.AR1 <- update(RSM.1, correlation=corAR1(, form = ~ time.ind|id)) # not converging 
+#RSM.toep <- update(RSM.1, correlation=corARMA(,form = ~ 1|id, p=4,q=0)) #not converging
+
+
+##retrying with RIM instead of RSM 
+(RIM <- lme(attit ~ age11, random = ~ 1 | id, NYS, method = 'ML'))
+
+# residuals as being correlated across time
+(RIM_AR1 <- update(RIM, correlation=corAR1(, form = ~ time.ind|id)))
+##varying variances at different levels of age11
+(RIM_with_hetero <- update(RIM, weights=varIdent(form = ~ 1|age11)))
+#residuals are modeled as a combination of past values (autoregression of order 4)
+(RIM_with_toep <- update(RIM, correlation=corARMA(,form = ~ 1|id, p=4,q=0)))
+
+```
+we can see lag=1 has strongest autocorrelation and not much beyond that value. Also we can see people with higher values of age11 have more variability in the attit scores compared to those with lower age11 values and as age increase variability increases which is a sign of heteroskedasticity.
+```{r 101}
+anova(RIM,RIM_AR1,RIM_with_hetero,RIM_with_toep, RSM_with_hetero)
+#RIM_AR1 provides a significant improvement over the base RIM model, suggesting that autocorrelation in the residuals is a significant factor.
+
+#RIM_with_hetero improves upon RIM_AR1, indicating that allowing for varying residual variances across age11 levels offers a better fit.
+
+#The RSM_with_hetero model appears to be the most complex and best-fitting model based on log-likelihood, AIC, and BIC, suggesting that accounting for both heteroscedasticity and the ARMA correlation structure improves model performance.
+
+
+```
+
+#7. Extend your model to include female, minority, and income as time-invariant predictors. Describe the role of each predictor in the model and interpret the corresponding parameter estimates in context.
+```{r 112 }
+(RSM_extended <- lme(attit ~ age11 + I(age11^2) + female + minority + income,
+random = ~ age11 + I(age11^2)| id, NYS, method = 'ML'))
+# Age has a positive relationship with attitude towards deviance and small postive effect of age sqaured which may amplify relation (non linear).  Belonging to a minority group  and being a female is associated with a small decrease in the attitude towards deviance. the negative coefficient for income suggests that as income increases, attitude towards deviance decreases slightly, though the effect is very small that this predictior might be insiginificant. looking at std dev the values are small indicating the majority of people have a similar starting point in their attitude towards deviance.
+
+##looking at correlation effect between intercept and age we can see that - those who start with higher deviant attitudes may show more pronounced changes in attitude as they age.  A strong negative correlation indicates that as age increases, the quadratic effect becomes more pronounced. 
+```
+
+
