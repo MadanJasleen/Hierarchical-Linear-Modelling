@@ -1,0 +1,137 @@
+---
+title: "EP964Assignment1_JM"
+author: "Jasleen Madan"
+date: "2025-02-03"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r 1}
+#install.packages('haven')
+#install.packages("tidyverse")
+#install.packages("lme4")
+#install.packages('matrix')
+#install.packages("lmerTest")
+library("haven") 
+library('tidyverse')
+library('dplyr')
+library("psych")
+library('ggplot2')
+library('lme4')
+library('table1')
+library('kableExtra')
+library('Hmisc')
+library('lmerTest')
+```
+
+```{r 2}
+nels88 <- read_sav("NELS88.sav") #reading in the file  
+nelss88<- as.data.frame(nels88) #to.data.frame arg was not working
+head(nels88)
+nels88$SCHOOLID  <- as.factor(nels88$SCHOOLID)
+nels88$STUDENTID <- as.factor(nels88$STUDENTID)
+
+
+#1 . school level dataset with selected columns
+school <- nels88 %>%
+  group_by(SCHOOLID) %>%
+  summarise(
+    schSize = first(schSize),    # taking only first since these values are already at the school level
+    schUrban = first(schUrban),  # Same as above
+    schHWmean = first(schHWmean),# Same as above
+    schMATHmean = mean(math),    # Calculate school-level math mean as its given at the student level
+    schSESmean = mean(SES)       # Calculate school-level SES mean
+  )
+
+print(school)
+```
+```{r 3}
+#2. Summary tables for school level and student level variables - 
+
+table1(~ math + SES + homework, data = nels88) #this is at student level
+```
+
+```{r 3.1}
+#now doing for school level variables
+# first, let's rename some variables
+label(school$schHWmean) <- "Average HW Score"
+label(school$schSize) <- "Number of Students"
+label(school$schMATHmean) <- "Average Math Score"
+label(school$schSESmean) <- "Average SES"
+
+# now let's label the levels of schUrban
+school$schUrban_fac <-
+  factor(school$schUrban, levels = c(0,1),
+         labels = c("No", "Yes"))
+
+label(school$schUrban_fac) <- "Urban School"
+
+
+# now we can generate our table
+table1(~ schHWmean + schSize + schUrban_fac + schMATHmean + schSESmean, data = school)
+
+```
+```{r 4}
+#3. school-specific scatterplots of math against SES
+scatter_plot <- ggplot(nels88, aes(x = SES, y = math, color = factor(SCHOOLID))) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, aes(group = SCHOOLID), color = "red", size = 0.4) +
+  theme_minimal() +
+  labs(title = "math scores vs SES per School", x = "SES", y = "math scores")
+print(scatter_plot)
+
+# we can see a psotive relation between SES and math scores, students with higher background have better math scores. some schools have strong positive slopes meaning SES has stronger impact on math scores in these schools. Some of the schools have flatte ror even negative slope. Moreover we can see clustering at the school level, menaing different schools have different SeS distributions.there are definite outliers
+
+#checking non linear
+scatter_plot <- ggplot(nels88, aes(x = SES, y = math, color = factor(SCHOOLID))) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(method = "loess", se = FALSE, aes(group = SCHOOLID), color = "red", size = 0.4) +
+  theme_minimal() +
+  labs(title = "math scores vs SES per School", x = "SES", y = "math scores")
+print(scatter_plot)
+
+#there are dips and curvatures meaning other factros might also be explaining the variaiton in math scores. however here the data is extremely small so this is overfitting. 
+```
+
+```{r 5}
+# 4.null model (random intercept model) - null random intercept model would analyze the variation in test scores across schools, without considering any student-level variables 
+null_m <- lmer(math ~  (1 | SCHOOLID), data = nels88)
+summary(null_m)
+
+# Intraclass Correlation (ICC)
+var_school <- as.numeric(VarCorr(null_m)$SCHOOLID[1,1])
+var_residual <- as.numeric(attr(VarCorr(null_m), "sc")^2)
+ICC <- var_school / (var_school + var_residual)
+print(paste("ICC:", round(ICC, 3)))
+
+
+#interpretation 
+print("Looking at the ICC we can say - 32% of the total variation in math scores is explained by differences between schools. The remaining 68% is due to student-level variation.")
+print("34.01 is the variance between schools suggests that maths scores for schools differ significantly and 72.26 suggests spread within schools, which is quite large. Scaled residuals suggest no extreme outliers (centered around mean)")
+```
+```{r 6}
+
+#Level 1 (Student level): math_ij = β_0j + β_1 * homework_ij + β_2 * SES_ij + r_ij
+# Level 2 (School level): β_0j = γ_00 + γ_01 * schSize_j + γ_02 * schUrban_j + u_j
+# Combined: math_ij = γ_00 + γ_01 * schSize_j + γ_02 * schUrban_j + β_1 * homework_ij + β_2 * SES_ij + u_j + r_ij
+
+#linear mixed model form - combined
+m2 <- lmer(math ~ homework + SES + schSize + schUrban + (1 | SCHOOLID), data = nels88, REML = TRUE)
+summary(m2)
+
+#interpretation 
+print("here we see the no of hours of homework and the ses are statistically significant whereas school size and urbanicity are not. We also observe that the REML value is lower indicating better fit.There is low correlation between predictionrs so multicollinearity is not an issue")
+
+```
+```{r 7}
+# Model 2 : level-1 predictor
+summary(m3 <- lmer(math ~ homework + SES + (1|SCHOOLID), nels88))
+print("Schools differ in their average math scores by about 3.1 points. The unexplained variability in student math scores is around 7.79 points. on average, Homeowrk and SES  increase does rasie math score with SES being more significant")
+
+#i am unable to understand how to get level 2 predictor equation 
+```
+
+
